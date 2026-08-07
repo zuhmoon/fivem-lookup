@@ -1,5 +1,10 @@
+# CLI working files, regenerated on demand — never belong in the repo.
+# ~20MB cached server list
 list.bin
+# local population history
 history.db
+# per-server dumps written by fivem.py
 *.json
 __pycache__/
-!.claude/launch.json
+# local editor / preview config
+.claude/
