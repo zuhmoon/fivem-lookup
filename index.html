@@ -228,7 +228,7 @@ const API = "https://frontend.cfx-services.net/api/servers";
 // Cfx serves the list with CORS open but intermittently drops the header on single/<code>,
 // which is the only source of resources + players. Deploy worker.js and paste its URL here
 // to make those reliable; leave blank and the page still works on stream data alone.
-const PROXY = "";
+const PROXY = "https://fivem-proxy.drwn-dead.workers.dev";
 const dec = new TextDecoder();
 let servers = [], latest = 0, current = null, shown = [];
 
