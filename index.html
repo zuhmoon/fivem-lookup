@@ -129,9 +129,6 @@
   .stat { display: flex; gap: 16px; flex-wrap: wrap; font: 13px ui-monospace, monospace; margin-bottom: 6px; }
   .stat b { color: var(--accent); font-weight: 600; }
 
-  .warn { margin-top: 12px; border: 1px solid var(--accent); border-left-width: 3px; border-radius: 9px;
-          background: #2a2118; padding: 11px 13px; font-size: 13px; line-height: 1.5; color: #e8dccb; }
-  .warn b { color: var(--accent); }
   .wpanel { margin-top: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); padding: 11px 12px; }
   .whead { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
   .whead b { font-size: 13px; flex: 1; }
@@ -170,20 +167,6 @@
         <input id="fTag" type="search" placeholder="tag…" autocomplete="off" style="width:120px">
       </div>
       <div class="frow">
-        <select id="fAc">
-          <option value="">any anticheat</option>
-          <option value="has">has a named anticheat</option>
-          <option value="none">no anticheat name visible</option>
-          <option value="electron">ElectronAC</option>
-          <option value="wave">Wave / WaveShield</option>
-          <option value="fiveguard">FiveGuard</option>
-          <option value="reaper">Reaper</option>
-          <option value="plprotect">pl_protect</option>
-          <option value="generic">*-anticheat (generic)</option>
-        </select>
-        <button id="acMore" hidden>scan more</button>
-      </div>
-      <div class="frow">
         <label>players</label>
         <input id="fMin" type="number" min="0" placeholder="min">
         <label>to</label>
@@ -195,14 +178,6 @@
       <button id="favBtn">★ favorites</button>
       <button id="watchBtn">watch names</button>
       <button id="csvBtn">⭳ CSV</button>
-    </div>
-    <div id="acNote" class="warn" hidden>
-      <b>“None visible” does not mean unprotected.</b>
-      This filter only knows whether a server runs a resource whose <i>name</i> is recognisable
-      as an anticheat. Vendors routinely tell operators to rename it so cheaters can't
-      fingerprint it — in a 608-server scan, <b>61% showed no recognisable name at all</b>.
-      Many of those are certainly protected. Treat this as “nothing advertised”, never as
-      “no anticheat”, and never as a list of servers worth attacking.
     </div>
     <div id="watchPanel" class="wpanel" hidden></div>
     <div id="status">loading server list…</div>
@@ -237,7 +212,17 @@ let servers = [], latest = 0, current = null, shown = [];
 //      12:repeated var{1:key,2:value}, 18:endpoint}. Verified against the live stream.
 function varint(b, i) {
   let n = 0, s = 0;
-  for (;;) { const c = b[i++]; n += (c & 0x7f) * 2 ** s; s += 7; if (!(c & 0x80)) return [n, i]; }
+  const start = i;
+  for (;;) { const c = b[i++]; n += (c & 0x7f) * 2 ** s; s += 7; if (!(c & 0x80)) break; }
+  // A varint longer than 7 bytes can exceed 2^53, where the float maths above quietly
+  // loses digits. Negative int32s are sign-extended to 10 bytes, so redo those with
+  // BigInt — otherwise iconVersion comes out as 1844674407... and every icon URL 404s.
+  if (i - start > 7) {
+    let big = 0n, sh = 0n;
+    for (let k = start; k < i; k++) { big |= BigInt(b[k] & 0x7f) << sh; sh += 7n; }
+    return [big, i];
+  }
+  return [n, i];
 }
 function* walk(b, i, end) {
   while (i < end) {
@@ -263,7 +248,8 @@ function parse(buf) {
         if (n2 === 1) s.max = v2;
         else if (n2 === 2) s.clients = v2;
         else if (n2 === 4) s.name = dec.decode(v2);
-        else if (n2 === 11) s.icon = v2;
+        // iconVersion is an int32 that is often negative; the URL uses the signed form
+        else if (n2 === 11) s.icon = typeof v2 === "bigint" ? Number(BigInt.asIntN(32, v2)) : v2;
         else if (n2 === 9) { const m = /v1\.0\.0\.(\d+)/.exec(dec.decode(v2)); if (m) s.build = +m[1]; }
         // only the three vars the filters need — the rest are decoded on click
         else if (n2 === 12) {
@@ -377,50 +363,10 @@ function csv(name, header, rows) {
   setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
-// ---- anticheat cache. Resources live only behind single/<code>, one request per server,
-// so anticheat can never be a free filter over 34k servers. Instead: scan the current
-// result set in capped batches, remember what we learn, and let the cache accumulate as
-// you browse. Resource lists change rarely, so a day is a fine TTL.
-// PARALLEL 6 with no pacing got only 30 of 60 through — Cfx 429s bursts and returns an HTML
-// error page. Three at a time with a short gap, plus one retry, lands the whole batch.
-// Cfx 429s bursts and answers with an HTML error page. Measured on the live site: 60 at
-// six-way concurrency landed 30; 60 paced landed 37. A batch of 30 that finishes beats a
-// batch of 60 that doesn't — "scan more" continues, and results are cached for a day.
-const ACKEY = "fivem-ac", AC_TTL = 864e5, SCAN_CAP = 30, PARALLEL = 3, GAP = 300;
-const PRODUCT = {
-  electron: /electron/i, wave: /wave|^w[-_]?shield$/i, fiveguard: /fiveguard/i,
-  reaper: /reaper/i, plprotect: /pl[-_]protect/i, generic: /anticheat/i,
-};
-
-// held in memory: acGet runs once per server per render, and re-parsing the whole cache
-// from localStorage 34k times per keystroke is not survivable
-let AC_MEM = null;
-const acCache = () => (AC_MEM ??= readJSON(ACKEY, {}));
-function acGet(code) {
-  const c = acCache()[code];
-  return c && Date.now() - c.ts < AC_TTL ? c : null;
-}
-function acPut(code, res) {
-  const c = acCache();
-  c[code] = { ac: res.filter(r => AC.test(r)), ts: Date.now() };
-  const keys = Object.keys(c);
-  if (keys.length > 3000) {                       // keep localStorage from creeping
-    keys.sort((a, b) => c[a].ts - c[b].ts).slice(0, 500).forEach(k => delete c[k]);
-  }
-  writeJSON(ACKEY, c);
-}
-function acPasses(code, mode) {
-  const c = acGet(code);
-  if (!c) return false;                           // unscanned: can't claim either way
-  if (mode === "has") return c.ac.length > 0;
-  if (mode === "none") return c.ac.length === 0;
-  return c.ac.some(r => PRODUCT[mode]?.test(r));
-}
-
 // ---- list + filters
 let favOnly = false;
 
-function matchBase() {
+function match() {
   const t = $("q").value.trim().toLowerCase();
   const g = $("fGame").value, lo = $("fLocale").value, tag = $("fTag").value.trim().toLowerCase();
   const min = parseInt($("fMin").value, 10), max = parseInt($("fMax").value, 10);
@@ -435,55 +381,10 @@ function matchBase() {
     (!fv || fv.includes(s.code))
   ).sort((a, b) => b.clients - a.clients);
 }
-function match(base) {
-  const mode = $("fAc").value;
-  base ??= matchBase();
-  return mode ? base.filter(s => acPasses(s.code, mode)) : base;
-}
-
-// Fetch resource lists for the next batch of unscanned matches, a few at a time.
-async function scanAc() {
-  const todo = matchBase().filter(s => !acGet(s.code)).slice(0, SCAN_CAP);
-  if (!todo.length) return { done: 0, failed: 0 };
-  let done = 0, failed = 0;
-  const queue = todo.slice();
-  const nap = ms => new Promise(r => setTimeout(r, ms));
-  await Promise.all(Array.from({ length: PARALLEL }, async (_, w) => {
-    await nap(w * 70);                                  // stagger the starts
-    for (;;) {
-      const s = queue.shift();
-      if (!s) return;
-      let got = false;
-      for (let attempt = 0; attempt < 2 && !got; attempt++) {
-        try {
-          const r = await fetch(`${PROXY || API}/single/${encodeURIComponent(s.code)}`);
-          const d = (await r.json()).Data;              // a 429 returns HTML and throws here
-          if (d?.resources) { acPut(s.code, d.resources); got = true; }
-        } catch { /* fall through to the retry */ }
-        if (!got && attempt === 0) await nap(800);      // rate limits are short-lived
-      }
-      if (!got) failed++;
-      $("status").textContent = `scanning for anticheat… ${++done}/${todo.length}`;
-      await nap(GAP);
-    }
-  }));
-  return { done, failed };
-}
-
-async function runScan() {
-  if (!$("fAc").value) return render();
-  $("acMore").disabled = true;
-  const { done, failed } = await scanAc();
-  $("acMore").disabled = false;
-  render();
-  if (failed && failed === done)
-    $("status").textContent += " · every request was blocked (CORS) — deploy worker.js";
-}
 
 function render() {
   if (!servers.length) return;
-  const base = matchBase();          // computed once and reused by the status line below
-  shown = match(base);
+  shown = match();
   const f = favs();
   $("hits").innerHTML = shown.slice(0, 200).map(s => `
     <li data-code="${esc(s.code)}" tabindex="0">
@@ -494,21 +395,10 @@ function render() {
       <span class="nm">${esc(s.plain) || "&lt;unnamed&gt;"}</span>
       <span class="cd">${esc(s.code)}</span>
     </li>`).join("") || `<li class="empty">nothing matches those filters</li>`;
-  const mode = $("fAc").value;
-  $("acNote").hidden = mode !== "none";
-  let note = `${shown.length.toLocaleString()} match${shown.length === 1 ? "" : "es"}` +
-             (shown.length > 200 ? ", showing top 200" : "");
-  if (mode) {
-    const unscanned = base.filter(s => !acGet(s.code)).length;
-    note += ` · scanned ${base.length - unscanned} of ${base.length}`;
-    if (unscanned) note += `, ${unscanned} unknown`;
-    $("acMore").hidden = !unscanned;
-    $("acMore").textContent = `scan ${Math.min(unscanned, SCAN_CAP)} more`;
-  } else {
-    $("acMore").hidden = true;
-    note += ` · ${servers.length.toLocaleString()} servers · current build ${latest}`;
-  }
-  $("status").textContent = note;
+  $("status").textContent =
+    `${shown.length.toLocaleString()} match${shown.length === 1 ? "" : "es"}` +
+    (shown.length > 200 ? ", showing top 200" : "") +
+    ` · ${servers.length.toLocaleString()} servers · current build ${latest}`;
 }
 
 async function load() {
@@ -609,7 +499,6 @@ async function deep(code) {
     return;
   }
   record(code, d.clients);                       // live count beats the cached list one
-  if (d.resources) acPut(code, d.resources);     // every server you open feeds the AC filter
   if (!$("deep") || current?.code !== code) return;   // user moved on while we waited
 
   const res = d.resources || [], players = d.players || [];
@@ -912,10 +801,8 @@ let t;
 $("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(render, 150); });
 for (const id of ["fGame", "fLocale", "fMin", "fMax"]) $(id).addEventListener("change", render);
 $("fTag").addEventListener("input", () => { clearTimeout(t); t = setTimeout(render, 150); });
-$("fAc").addEventListener("change", runScan);
-$("acMore").addEventListener("click", runScan);
 $("fReset").addEventListener("click", () => {
-  for (const id of ["fGame", "fLocale", "fTag", "fMin", "fMax", "fAc"]) $(id).value = "";
+  for (const id of ["fGame", "fLocale", "fTag", "fMin", "fMax"]) $(id).value = "";
   render();
 });
 $("favBtn").addEventListener("click", () => {
