@@ -381,7 +381,9 @@ function csv(name, header, rows) {
 // so anticheat can never be a free filter over 34k servers. Instead: scan the current
 // result set in capped batches, remember what we learn, and let the cache accumulate as
 // you browse. Resource lists change rarely, so a day is a fine TTL.
-const ACKEY = "fivem-ac", AC_TTL = 864e5, SCAN_CAP = 60, PARALLEL = 6;
+// PARALLEL 6 with no pacing got only 30 of 60 through — Cfx 429s bursts and returns an HTML
+// error page. Three at a time with a short gap, plus one retry, lands the whole batch.
+const ACKEY = "fivem-ac", AC_TTL = 864e5, SCAN_CAP = 60, PARALLEL = 3, GAP = 220;
 const PRODUCT = {
   electron: /electron/i, wave: /wave|^w[-_]?shield$/i, fiveguard: /fiveguard/i,
   reaper: /reaper/i, plprotect: /pl[-_]protect/i, generic: /anticheat/i,
@@ -442,16 +444,24 @@ async function scanAc() {
   if (!todo.length) return { done: 0, failed: 0 };
   let done = 0, failed = 0;
   const queue = todo.slice();
-  await Promise.all(Array.from({ length: PARALLEL }, async () => {
+  const nap = ms => new Promise(r => setTimeout(r, ms));
+  await Promise.all(Array.from({ length: PARALLEL }, async (_, w) => {
+    await nap(w * 70);                                  // stagger the starts
     for (;;) {
       const s = queue.shift();
       if (!s) return;
-      try {
-        const r = await fetch(`${PROXY || API}/single/${encodeURIComponent(s.code)}`);
-        const d = (await r.json()).Data;
-        if (d?.resources) acPut(s.code, d.resources); else failed++;
-      } catch { failed++; }
+      let got = false;
+      for (let attempt = 0; attempt < 2 && !got; attempt++) {
+        try {
+          const r = await fetch(`${PROXY || API}/single/${encodeURIComponent(s.code)}`);
+          const d = (await r.json()).Data;              // a 429 returns HTML and throws here
+          if (d?.resources) { acPut(s.code, d.resources); got = true; }
+        } catch { /* fall through to the retry */ }
+        if (!got && attempt === 0) await nap(800);      // rate limits are short-lived
+      }
+      if (!got) failed++;
       $("status").textContent = `scanning for anticheat… ${++done}/${todo.length}`;
+      await nap(GAP);
     }
   }));
   return { done, failed };
