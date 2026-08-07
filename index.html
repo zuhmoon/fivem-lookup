@@ -383,7 +383,10 @@ function csv(name, header, rows) {
 // you browse. Resource lists change rarely, so a day is a fine TTL.
 // PARALLEL 6 with no pacing got only 30 of 60 through — Cfx 429s bursts and returns an HTML
 // error page. Three at a time with a short gap, plus one retry, lands the whole batch.
-const ACKEY = "fivem-ac", AC_TTL = 864e5, SCAN_CAP = 60, PARALLEL = 3, GAP = 220;
+// Cfx 429s bursts and answers with an HTML error page. Measured on the live site: 60 at
+// six-way concurrency landed 30; 60 paced landed 37. A batch of 30 that finishes beats a
+// batch of 60 that doesn't — "scan more" continues, and results are cached for a day.
+const ACKEY = "fivem-ac", AC_TTL = 864e5, SCAN_CAP = 30, PARALLEL = 3, GAP = 300;
 const PRODUCT = {
   electron: /electron/i, wave: /wave|^w[-_]?shield$/i, fiveguard: /fiveguard/i,
   reaper: /reaper/i, plprotect: /pl[-_]protect/i, generic: /anticheat/i,
