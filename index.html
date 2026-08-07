@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FiveM Server Lookup</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f26; --line: #2b2f39; --fg: #e6e8ec;
+    --dim: #8b929f; --accent: #ff9f43; --bad: #ff6b6b; --ok: #4ecb71;
+    --scroll: #3a414f; --scroll-hi: #ff9f43;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, sans-serif; }
+
+  /* ---- native chrome, themed ---- */
+  /* Firefox + Chrome 121+ understand the standard properties; the -webkit- block below
+     covers older Chrome/Safari. Both are needed, neither is redundant. */
+  * { scrollbar-width: thin; scrollbar-color: var(--scroll) transparent; }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scroll); border-radius: 99px;
+    /* transparent border + padding-box keeps the thumb inset over any panel colour */
+    border: 3px solid transparent; background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: var(--scroll-hi); background-clip: padding-box; }
+  ::selection { background: var(--accent); color: #14161a; }
+
+  input[type=number] { appearance: textfield; }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { appearance: none; margin: 0; }
+
+  input[type=search]::-webkit-search-cancel-button {
+    appearance: none; width: 13px; height: 13px; cursor: pointer; opacity: .5;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='13' height='13'%3E%3Cpath d='M3 3l7 7M10 3l-7 7' stroke='%238b929f' stroke-width='1.7' stroke-linecap='round'/%3E%3C/svg%3E") center/contain no-repeat;
+  }
+  input[type=search]::-webkit-search-cancel-button:hover { opacity: 1; }
+
+  summary { list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before {
+    content: "▸"; display: inline-block; margin-right: 6px; color: var(--dim);
+    transition: transform .15s ease;
+  }
+  details[open] > summary::before { transform: rotate(90deg); }
+  header { padding: 20px 20px 13px; border-bottom: 1px solid var(--line); }
+  h1 { margin: 0 0 3px; font-size: 19px; letter-spacing: -.2px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--dim); font-size: 13px; }
+  .wrap { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.2fr); gap: 18px; padding: 16px 20px 60px; max-width: 1320px; margin: 0 auto; }
+  @media (max-width: 880px) { .wrap { grid-template-columns: 1fr; } }
+
+  /* background-color, not the background shorthand — the shorthand would wipe the select's
+     chevron image below */
+  input, select { border-radius: 7px; border: 1px solid var(--line); background-color: var(--panel); color: var(--fg); font-size: 14px; padding: 8px 10px; }
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238b929f' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center; padding-right: 28px;
+  }
+  select:hover { border-color: #3a404d; }
+  option { background: var(--panel); color: var(--fg); }   /* the popup itself is OS-drawn */
+  input[type=search]#q { width: 100%; padding: 11px 13px; font-size: 15px; }
+  input:focus, select:focus, li:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  button { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer; }
+  button:hover { color: var(--fg); border-color: var(--accent); }
+  button.on { color: var(--accent); border-color: var(--accent); }
+
+  #filters { margin: 10px 0 0; }
+  #filters summary { cursor: pointer; color: var(--dim); font-size: 13px; }
+  .frow { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  .frow input[type=number] { width: 84px; }
+  .frow label { color: var(--dim); font-size: 12px; }
+  .bar-tools { display: flex; gap: 7px; margin: 11px 0 0; flex-wrap: wrap; }
+  #status { color: var(--dim); font-size: 13px; margin: 10px 2px; min-height: 20px; }
+
+  #hits { list-style: none; margin: 0; padding: 0; max-height: 68vh; overflow-y: auto; }
+  #hits li { display: flex; gap: 9px; align-items: center; padding: 7px 9px; cursor: pointer; border-radius: 7px; border: 1px solid transparent; }
+  #hits li:hover { background: var(--panel); }
+  #hits li[aria-selected=true] { background: var(--panel); border-color: var(--accent); }
+  .star { background: none; border: 0; color: #4a5160; font-size: 15px; padding: 0 2px; cursor: pointer; line-height: 1; }
+  .star.fav { color: var(--accent); }
+  .ico { width: 22px; height: 22px; border-radius: 4px; flex: none; background: #262a33; object-fit: cover; }
+  .pop { font: 13px ui-monospace, monospace; color: var(--accent); min-width: 74px; }
+  .nm { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cd { font: 12px ui-monospace, monospace; color: var(--dim); }
+
+  #detail { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-height: 200px; }
+  .dhead { display: flex; gap: 11px; align-items: center; margin-bottom: 14px; }
+  .dhead img { width: 40px; height: 40px; border-radius: 7px; background: #262a33; }
+  .dhead h2 { margin: 0; font-size: 17px; word-break: break-word; flex: 1; }
+  dl { display: grid; grid-template-columns: 108px minmax(0,1fr); gap: 6px 12px; margin: 0 0 16px; font-size: 14px; }
+  dt { color: var(--dim); }
+  dd { margin: 0; font-family: ui-monospace, monospace; font-size: 13px; word-break: break-word; }
+  a { color: var(--accent); }
+  .flag { color: var(--bad); } .fine { color: var(--ok); }
+  .box { border-top: 1px solid var(--line); padding-top: 13px; margin-top: 13px; font-size: 14px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .tag { font: 12px ui-monospace, monospace; background: #262a33; border-radius: 5px; padding: 2px 7px; color: var(--dim); }
+  .empty { color: var(--dim); }
+  .open { margin-right: 7px; margin-top: 10px; color: var(--fg); border-color: #3a404d; padding: 6px 12px; font-size: 13px; }
+
+  dialog { width: min(720px, 92vw); max-height: 82vh; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--fg); display: flex; flex-direction: column; overflow: hidden; }
+  dialog:not([open]) { display: none; }
+  dialog::backdrop { background: #000a; }
+  .mhead { display: flex; gap: 10px; align-items: center; padding: 13px 15px 0; }
+  .mhead h3 { margin: 0; font-size: 15px; flex: 1; }
+  .mfilter { padding: 11px 15px 12px; border-bottom: 1px solid var(--line); }
+  .mfilter input { width: 100%; }
+  #mBody { overflow-y: auto; padding: 13px 15px 18px; }
+  #mCount { color: var(--dim); font-size: 12px; font-family: ui-monospace, monospace; }
+
+  table.pl { width: 100%; border-collapse: collapse; margin-top: 9px; font: 13px ui-monospace, monospace; }
+  table.pl th { text-align: left; color: var(--dim); font-weight: 400; border-bottom: 1px solid var(--line); padding: 4px 6px; }
+  table.pl td { padding: 3px 6px; border-bottom: 1px solid #22262e; }
+  table.pl td:nth-child(1), table.pl td:nth-child(3) { color: var(--dim); width: 60px; }
+  table.pl th[data-k] { cursor: pointer; user-select: none; }
+  table.pl th[data-k]:hover { color: var(--fg); }
+  table.pl th.on { color: var(--accent); }
+  dl.vars { grid-template-columns: minmax(120px, 30%) minmax(0,1fr); margin-top: 9px; font-size: 13px; }
+  dl.vars dt { font-family: ui-monospace, monospace; word-break: break-word; }
+
+  .bars { margin-top: 12px; font: 12px ui-monospace, monospace; }
+  .bar { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+  .bar .hr { color: var(--dim); width: 44px; }
+  .bar .fill { background: var(--accent); height: 11px; border-radius: 2px; min-width: 2px; }
+  .bar .n { color: var(--dim); }
+  .stat { display: flex; gap: 16px; flex-wrap: wrap; font: 13px ui-monospace, monospace; margin-bottom: 6px; }
+  .stat b { color: var(--accent); font-weight: 600; }
+
+  .warn { margin-top: 12px; border: 1px solid var(--accent); border-left-width: 3px; border-radius: 9px;
+          background: #2a2118; padding: 11px 13px; font-size: 13px; line-height: 1.5; color: #e8dccb; }
+  .warn b { color: var(--accent); }
+  .wpanel { margin-top: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); padding: 11px 12px; }
+  .whead { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+  .whead b { font-size: 13px; flex: 1; }
+  .wrow { display: flex; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid #22262e; font-size: 13px; }
+  .wrow:first-of-type { border-top: 0; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--dim); }
+  .dot.on { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot.off { background: #4a5160; }
+  .dot.unk { background: var(--accent); }
+  .wname { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wwhere { font: 12px ui-monospace, monospace; color: var(--dim); max-width: 44%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .wwhere:hover { color: var(--accent); }
+  .wrow .x { border: 0; background: none; color: #4a5160; padding: 0 2px; font-size: 14px; }
+  .wrow .x:hover { color: var(--bad); }
+  .watchrow { display: flex; gap: 7px; align-items: center; margin-bottom: 6px; }
+  .watchrow span { flex: 1; font-family: ui-monospace, monospace; font-size: 13px; }
+  #toast { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 9; }
+  .tst { background: var(--panel); border: 1px solid var(--accent); border-radius: 9px; padding: 11px 14px; font-size: 13px; max-width: 330px; box-shadow: 0 6px 22px #0008; }
+  .tst button { float: right; margin-left: 10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>FiveM <span>Server Lookup</span></h1>
+  <div class="sub">Public data every server publishes about itself. Nothing here needs an account.</div>
+</header>
+
+<div class="wrap">
+  <div>
+    <input type="search" id="q" placeholder="server name… (leave blank to browse)" autocomplete="off" autofocus>
+    <details id="filters">
+      <summary>filters</summary>
+      <div class="frow">
+        <select id="fGame"><option value="">any game</option></select>
+        <select id="fLocale"><option value="">any locale</option></select>
+        <input id="fTag" type="search" placeholder="tag…" autocomplete="off" style="width:120px">
+      </div>
+      <div class="frow">
+        <select id="fAc">
+          <option value="">any anticheat</option>
+          <option value="has">has a named anticheat</option>
+          <option value="none">no anticheat name visible</option>
+          <option value="electron">ElectronAC</option>
+          <option value="wave">Wave / WaveShield</option>
+          <option value="fiveguard">FiveGuard</option>
+          <option value="reaper">Reaper</option>
+          <option value="plprotect">pl_protect</option>
+          <option value="generic">*-anticheat (generic)</option>
+        </select>
+        <button id="acMore" hidden>scan more</button>
+      </div>
+      <div class="frow">
+        <label>players</label>
+        <input id="fMin" type="number" min="0" placeholder="min">
+        <label>to</label>
+        <input id="fMax" type="number" min="0" placeholder="max">
+        <button id="fReset">reset</button>
+      </div>
+    </details>
+    <div class="bar-tools">
+      <button id="favBtn">★ favorites</button>
+      <button id="watchBtn">watch names</button>
+      <button id="csvBtn">⭳ CSV</button>
+    </div>
+    <div id="acNote" class="warn" hidden>
+      <b>“None visible” does not mean unprotected.</b>
+      This filter only knows whether a server runs a resource whose <i>name</i> is recognisable
+      as an anticheat. Vendors routinely tell operators to rename it so cheaters can't
+      fingerprint it — in a 608-server scan, <b>61% showed no recognisable name at all</b>.
+      Many of those are certainly protected. Treat this as “nothing advertised”, never as
+      “no anticheat”, and never as a list of servers worth attacking.
+    </div>
+    <div id="watchPanel" class="wpanel" hidden></div>
+    <div id="status">loading server list…</div>
+    <ul id="hits"></ul>
+  </div>
+  <div id="detail"><div class="empty">Pick a server, or just hit ↓ to browse.</div></div>
+</div>
+
+<dialog id="modal">
+  <div class="mhead">
+    <h3 id="mTitle"></h3>
+    <span id="mCount"></span>
+    <button id="mCsv" hidden>⭳ CSV</button>
+    <button id="mClose" aria-label="close">&times;</button>
+  </div>
+  <div class="mfilter" id="mFilterRow"><input id="mFilter" type="search" placeholder="filter…" autocomplete="off"></div>
+  <div id="mBody"></div>
+</dialog>
+<div id="toast"></div>
+
+<script>
+const API = "https://frontend.cfx-services.net/api/servers";
+// Cfx serves the list with CORS open but intermittently drops the header on single/<code>,
+// which is the only source of resources + players. Deploy worker.js and paste its URL here
+// to make those reliable; leave blank and the page still works on stream data alone.
+const PROXY = "";
+const dec = new TextDecoder();
+let servers = [], latest = 0, current = null, shown = [];
+
+// ---- protobuf: <u32 le len><Server{1:code, 2:Data}>
+// Data{1:max, 2:clients, 4:hostname, 5:gametype, 6:map, 9:version, 11:iconVersion,
+//      12:repeated var{1:key,2:value}, 18:endpoint}. Verified against the live stream.
+function varint(b, i) {
+  let n = 0, s = 0;
+  for (;;) { const c = b[i++]; n += (c & 0x7f) * 2 ** s; s += 7; if (!(c & 0x80)) return [n, i]; }
+}
+function* walk(b, i, end) {
+  while (i < end) {
+    let key; [key, i] = varint(b, i);
+    const no = key >>> 3, wt = key & 7;
+    if (wt === 0) { let v; [v, i] = varint(b, i); yield [no, v]; }
+    else if (wt === 2) { let ln; [ln, i] = varint(b, i); yield [no, b.subarray(i, i + ln)]; i += ln; }
+    else if (wt === 5) i += 4;
+    else if (wt === 1) i += 8;
+    else return;               // unexpected wiretype: stop rather than desync the stream
+  }
+}
+function parse(buf) {
+  const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength), out = [];
+  let off = 0;
+  while (off + 4 <= buf.length) {
+    const len = dv.getUint32(off, true); off += 4;
+    if (off + len > buf.length) break;                  // truncated tail
+    const s = { clients: 0, max: 0, name: "", build: 0, icon: 0, locale: "", game: "", tags: "" };
+    for (const [no, v] of walk(buf, off, off + len)) {
+      if (no === 1) s.code = dec.decode(v);
+      else if (no === 2) for (const [n2, v2] of walk(v, 0, v.length)) {
+        if (n2 === 1) s.max = v2;
+        else if (n2 === 2) s.clients = v2;
+        else if (n2 === 4) s.name = dec.decode(v2);
+        else if (n2 === 11) s.icon = v2;
+        else if (n2 === 9) { const m = /v1\.0\.0\.(\d+)/.exec(dec.decode(v2)); if (m) s.build = +m[1]; }
+        // only the three vars the filters need — the rest are decoded on click
+        else if (n2 === 12) {
+          let k, val;
+          for (const [n3, v3] of walk(v2, 0, v2.length)) {
+            if (n3 === 1) k = dec.decode(v3); else if (n3 === 2) val = v3;
+          }
+          if (k === "locale") s.locale = dec.decode(val || new Uint8Array());
+          else if (k === "gamename") s.game = dec.decode(val || new Uint8Array());
+          else if (k === "tags") s.tags = dec.decode(val || new Uint8Array()).toLowerCase();
+        }
+      }
+    }
+    s.raw = buf.subarray(off, off + len);               // view, not a copy
+    off += len;
+    if (s.code) { s.plain = s.name.replace(/\^[0-9]/g, "").trim(); s.lower = s.plain.toLowerCase(); out.push(s); }
+  }
+  return out;
+}
+// 99th pct, not max — one server self-reporting a bogus version can't move the bar.
+const latestBuild = list => {
+  const b = list.map(s => s.build).filter(Boolean).sort((x, y) => x - y);
+  return b.length ? b[Math.floor(b.length * 0.99) - 1] : 0;
+};
+// The rest of Data{}, decoded only for the server you clicked.
+function expand(s) {
+  const d = { vars: {} };
+  for (const [no, v] of walk(s.raw, 0, s.raw.length)) {
+    if (no !== 2) continue;
+    for (const [n2, v2] of walk(v, 0, v.length)) {
+      if (n2 === 5) d.gametype = dec.decode(v2);
+      else if (n2 === 6) d.mapname = dec.decode(v2);
+      else if (n2 === 9) d.server = dec.decode(v2);
+      else if (n2 === 18) d.endpoint = dec.decode(v2);
+      else if (n2 === 12) {
+        let k, val;
+        for (const [n3, v3] of walk(v2, 0, v2.length)) {
+          if (n3 === 1) k = dec.decode(v3); else if (n3 === 2) val = dec.decode(v3);
+        }
+        if (k) d.vars[k] = val ?? "";
+      }
+    }
+  }
+  return d;
+}
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+const med = a => { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; };
+const icoUrl = s => s.icon ? `${API}/icon/${s.code}/${s.icon}.png` : "";
+
+// Named products + the literal word anticheat. Built from a 608-server scan and anchored
+// hard: "sentinel" and "defender" are car names, "guardian"/"shield" are clothing and police
+// props, and anti-lag / anti-strafe / anti-bump are gameplay tweaks, not anticheats.
+// Measured on that corpus: 38% expose a named anticheat, 1% only a *_ac suffix, 61% nothing.
+const AC = /anti[-_ ]?cheat|^electron(ac)?$|electron[-_]?ac|fiveguard|^(fivem[-_]?)?waveshield$|^wave$|^w[-_]?shield$|^reaper(v\d+)?([-_]?ac)?$|^pl[-_]protect$|^shieldm[-_]fivem$|^cfguard$|^bjornshield$|^likizao[-_]ac$|^ec[-_]ac$|^rmod_gauntlet_ac$|^hyperion$|^sentinel[-_]ac$|^scarab[-_]?ac$|^athena[-_]?ac$|^watchdog$/i;
+// trailing _ac is a common convention but also catches unrelated scripts — show separately
+const MAYBE_AC = /[-_]ac$/i;
+
+// ---- stored state
+const HKEY = "fivem-history", FKEY = "fivem-favs", WKEY = "fivem-watch", CAP = 2000;
+const readJSON = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
+const writeJSON = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+const favs = () => readJSON(FKEY, []);
+const watches = () => readJSON(WKEY, []);
+const isFav = c => favs().includes(c);
+
+function toggleFav(code) {
+  const f = favs(), i = f.indexOf(code), on = i < 0;
+  if (on) f.push(code); else f.splice(i, 1);
+  writeJSON(FKEY, f);
+  // flip the stars in place: a full re-render would throw away the list's scroll position
+  document.querySelectorAll(`[data-fav="${CSS.escape(code)}"]`).forEach(b => {
+    b.classList.toggle("fav", on);
+    b.textContent = on ? "★" : "☆";
+  });
+  if (favOnly) render();                      // in favorites view the row must appear/vanish
+}
+
+// ---- history: one [timestamp, clients] pair per server per visit, in localStorage.
+// A page can't poll while it's closed, so this fills in as you browse, plus 5-minute
+// sampling of your favorites for as long as the tab stays open.
+function record(code, clients) {
+  if (!Number.isFinite(clients)) return;
+  const h = readJSON(HKEY, {}), a = h[code] || (h[code] = []);
+  const now = Date.now();
+  // one sample per visit — replace rather than skip, so the live count from deep()
+  // supersedes the possibly-stale one the cached list gave us moments earlier
+  if (a.length && now - a.at(-1)[0] < 60000) a[a.length - 1] = [now, clients];
+  else a.push([now, clients]);
+  if (a.length > CAP) a.splice(0, a.length - CAP);
+  try {
+    localStorage.setItem(HKEY, JSON.stringify(h));
+  } catch {
+    // quota full: drop the series touched least recently, then try once more
+    const stale = Object.keys(h).filter(c => c !== code)
+      .sort((x, y) => (h[x].at(-1)?.[0] || 0) - (h[y].at(-1)?.[0] || 0))[0];
+    if (stale) { delete h[stale]; try { localStorage.setItem(HKEY, JSON.stringify(h)); } catch {} }
+  }
+}
+
+// ---- CSV
+function csv(name, header, rows) {
+  const q = c => `"${String(c ?? "").replace(/"/g, '""')}"`;
+  const body = [header, ...rows].map(r => r.map(q).join(",")).join("\r\n");
+  // leading BOM (invisible, before the quote) so Excel reads the unicode player names as
+  // UTF-8 instead of mojibake — verified as EF BB BF on the emitted blob
+  const url = URL.createObjectURL(new Blob(["﻿" + body], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+
+// ---- anticheat cache. Resources live only behind single/<code>, one request per server,
+// so anticheat can never be a free filter over 34k servers. Instead: scan the current
+// result set in capped batches, remember what we learn, and let the cache accumulate as
+// you browse. Resource lists change rarely, so a day is a fine TTL.
+const ACKEY = "fivem-ac", AC_TTL = 864e5, SCAN_CAP = 60, PARALLEL = 6;
+const PRODUCT = {
+  electron: /electron/i, wave: /wave|^w[-_]?shield$/i, fiveguard: /fiveguard/i,
+  reaper: /reaper/i, plprotect: /pl[-_]protect/i, generic: /anticheat/i,
+};
+
+// held in memory: acGet runs once per server per render, and re-parsing the whole cache
+// from localStorage 34k times per keystroke is not survivable
+let AC_MEM = null;
+const acCache = () => (AC_MEM ??= readJSON(ACKEY, {}));
+function acGet(code) {
+  const c = acCache()[code];
+  return c && Date.now() - c.ts < AC_TTL ? c : null;
+}
+function acPut(code, res) {
+  const c = acCache();
+  c[code] = { ac: res.filter(r => AC.test(r)), ts: Date.now() };
+  const keys = Object.keys(c);
+  if (keys.length > 3000) {                       // keep localStorage from creeping
+    keys.sort((a, b) => c[a].ts - c[b].ts).slice(0, 500).forEach(k => delete c[k]);
+  }
+  writeJSON(ACKEY, c);
+}
+function acPasses(code, mode) {
+  const c = acGet(code);
+  if (!c) return false;                           // unscanned: can't claim either way
+  if (mode === "has") return c.ac.length > 0;
+  if (mode === "none") return c.ac.length === 0;
+  return c.ac.some(r => PRODUCT[mode]?.test(r));
+}
+
+// ---- list + filters
+let favOnly = false;
+
+function matchBase() {
+  const t = $("q").value.trim().toLowerCase();
+  const g = $("fGame").value, lo = $("fLocale").value, tag = $("fTag").value.trim().toLowerCase();
+  const min = parseInt($("fMin").value, 10), max = parseInt($("fMax").value, 10);
+  const fv = favOnly ? favs() : null;
+  return servers.filter(s =>
+    (!t || s.lower.includes(t)) &&
+    (!g || s.game === g) &&
+    (!lo || s.locale === lo) &&
+    (!tag || s.tags.includes(tag)) &&
+    (!Number.isFinite(min) || s.clients >= min) &&
+    (!Number.isFinite(max) || s.clients <= max) &&
+    (!fv || fv.includes(s.code))
+  ).sort((a, b) => b.clients - a.clients);
+}
+function match(base) {
+  const mode = $("fAc").value;
+  base ??= matchBase();
+  return mode ? base.filter(s => acPasses(s.code, mode)) : base;
+}
+
+// Fetch resource lists for the next batch of unscanned matches, a few at a time.
+async function scanAc() {
+  const todo = matchBase().filter(s => !acGet(s.code)).slice(0, SCAN_CAP);
+  if (!todo.length) return { done: 0, failed: 0 };
+  let done = 0, failed = 0;
+  const queue = todo.slice();
+  await Promise.all(Array.from({ length: PARALLEL }, async () => {
+    for (;;) {
+      const s = queue.shift();
+      if (!s) return;
+      try {
+        const r = await fetch(`${PROXY || API}/single/${encodeURIComponent(s.code)}`);
+        const d = (await r.json()).Data;
+        if (d?.resources) acPut(s.code, d.resources); else failed++;
+      } catch { failed++; }
+      $("status").textContent = `scanning for anticheat… ${++done}/${todo.length}`;
+    }
+  }));
+  return { done, failed };
+}
+
+async function runScan() {
+  if (!$("fAc").value) return render();
+  $("acMore").disabled = true;
+  const { done, failed } = await scanAc();
+  $("acMore").disabled = false;
+  render();
+  if (failed && failed === done)
+    $("status").textContent += " · every request was blocked (CORS) — deploy worker.js";
+}
+
+function render() {
+  if (!servers.length) return;
+  const base = matchBase();          // computed once and reused by the status line below
+  shown = match(base);
+  const f = favs();
+  $("hits").innerHTML = shown.slice(0, 200).map(s => `
+    <li data-code="${esc(s.code)}" tabindex="0">
+      <button class="star ${f.includes(s.code) ? "fav" : ""}" data-fav="${esc(s.code)}"
+        aria-label="favorite" title="favorite">${f.includes(s.code) ? "★" : "☆"}</button>
+      ${s.icon ? `<img class="ico" loading="lazy" src="${esc(icoUrl(s))}" alt="">` : `<span class="ico"></span>`}
+      <span class="pop">${s.clients}/${s.max}</span>
+      <span class="nm">${esc(s.plain) || "&lt;unnamed&gt;"}</span>
+      <span class="cd">${esc(s.code)}</span>
+    </li>`).join("") || `<li class="empty">nothing matches those filters</li>`;
+  const mode = $("fAc").value;
+  $("acNote").hidden = mode !== "none";
+  let note = `${shown.length.toLocaleString()} match${shown.length === 1 ? "" : "es"}` +
+             (shown.length > 200 ? ", showing top 200" : "");
+  if (mode) {
+    const unscanned = base.filter(s => !acGet(s.code)).length;
+    note += ` · scanned ${base.length - unscanned} of ${base.length}`;
+    if (unscanned) note += `, ${unscanned} unknown`;
+    $("acMore").hidden = !unscanned;
+    $("acMore").textContent = `scan ${Math.min(unscanned, SCAN_CAP)} more`;
+  } else {
+    $("acMore").hidden = true;
+    note += ` · ${servers.length.toLocaleString()} servers · current build ${latest}`;
+  }
+  $("status").textContent = note;
+}
+
+async function load() {
+  const res = await fetch(API + "/streamRedir/");
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const chunks = []; let got = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value); got += value.length;
+    $("status").textContent = `downloading list… ${(got / 1048576).toFixed(1)} MB`;
+  }
+  const all = new Uint8Array(got); let at = 0;
+  for (const c of chunks) { all.set(c, at); at += c.length; }
+  servers = parse(all);
+  latest = latestBuild(servers);
+
+  // filter options come from the data, so they can't drift out of date
+  const count = key => {
+    const m = new Map();
+    for (const s of servers) if (s[key]) m.set(s[key], (m.get(s[key]) || 0) + 1);
+    return [...m].sort((a, b) => b[1] - a[1]);
+  };
+  $("fGame").innerHTML = `<option value="">any game</option>` +
+    count("game").map(([g, n]) => `<option value="${esc(g)}">${esc(g)} (${n})</option>`).join("");
+  $("fLocale").innerHTML = `<option value="">any locale</option>` +
+    count("locale").slice(0, 40).map(([l, n]) => `<option value="${esc(l)}">${esc(l)} (${n})</option>`).join("");
+
+  render();
+  renderWatch();
+  const want = new URLSearchParams(location.search).get("s");
+  if (want) {
+    const s = servers.find(x => x.code === want);
+    if (s) detail(s);
+    else $("detail").innerHTML = `<div class="empty">No listed server with code ${esc(want)}.</div>`;
+  }
+  sampleFavs();
+}
+
+// ---- detail
+function detail(s, el) {
+  current = s;
+  document.querySelectorAll("#hits li").forEach(l =>
+    l.toggleAttribute("aria-selected", l.dataset.code === s.code));
+  el?.setAttribute("aria-selected", "true");
+  history.replaceState(null, "", `?s=${encodeURIComponent(s.code)}`);
+
+  const x = expand(s), v = x.vars;
+  const gap = s.build && latest ? latest - s.build : 0;
+  const build = esc(x.server || "?") +
+    (gap > 500 ? ` <span class="flag">— ${gap} builds behind (${latest})</span>` : "");
+
+  $("detail").innerHTML = `
+    <div class="dhead">
+      ${s.icon ? `<img src="${esc(icoUrl(s))}" alt="">` : ""}
+      <h2>${esc(s.plain) || "&lt;unnamed&gt;"}</h2>
+      <button class="star ${isFav(s.code) ? "fav" : ""}" data-fav="${esc(s.code)}"
+        style="font-size:20px">${isFav(s.code) ? "★" : "☆"}</button>
+    </div>
+    <dl>
+      <dt>join</dt><dd><a href="https://cfx.re/join/${esc(s.code)}" target="_blank" rel="noopener">cfx.re/join/${esc(s.code)}</a></dd>
+      <dt>endpoint</dt><dd>${esc(x.endpoint || "(proxied)")}</dd>
+      <dt>players</dt><dd>${s.clients}/${s.max}</dd>
+      <dt>build</dt><dd>${build}</dd>
+      <dt>game</dt><dd>${esc(x.gametype || "?")} / ${esc(x.mapname || "?")} · ${esc(v.gamename || "")}</dd>
+      <dt>project</dt><dd>${esc(v.sv_projectName || "-")}</dd>
+      <dt>locale</dt><dd>${esc(v.locale || "-")} · game build ${esc(v.sv_enforceGameBuild || "default")} · scripthook ${esc(v.sv_scriptHookAllowed ?? "?")}</dd>
+      <dt>tags</dt><dd>${esc(v.tags || "-")}</dd>
+    </dl>
+    ${v.sv_projectDesc ? `<div class="box">${esc(v.sv_projectDesc)}</div>` : ""}
+    <div class="box" id="deep"><span class="empty">loading players and resources…</span></div>
+    <div class="box">
+      <button class="open" onclick="showVars()">${Object.keys(v).length} server vars</button>
+      <button class="open" onclick="showHistory()">history</button>
+    </div>`;
+
+  lastVars = Object.entries(v);
+  record(s.code, s.clients);          // fresher count follows from deep() if it gets through
+  deep(s.code);
+}
+
+// Resources and the player list live only behind single/<code>, which is CORS-gated.
+// Try it anyway and say plainly what happened if it fails.
+async function deep(code) {
+  let d;
+  try {
+    const r = await fetch(`${PROXY || API}/single/${encodeURIComponent(code)}`);
+    d = (await r.json()).Data;
+    if (!d) throw new Error("empty response");
+  } catch {
+    const box = $("deep");
+    if (box) box.innerHTML = `<b>players &amp; resources unavailable</b>
+      <div class="cd" style="margin-top:6px">Cfx serves the list with CORS open but not
+      <code>single/${esc(code)}</code>, so a static page can't read it. Deploy
+      <code>worker.js</code> and set <code>PROXY</code>, or use
+      <code>python fivem.py --players ${esc(code)}</code>.</div>`;
+    return;
+  }
+  record(code, d.clients);                       // live count beats the cached list one
+  if (d.resources) acPut(code, d.resources);     // every server you open feeds the AC filter
+  if (!$("deep") || current?.code !== code) return;   // user moved on while we waited
+
+  const res = d.resources || [], players = d.players || [];
+  const pings = players.map(p => p.ping ?? 0), said = d.selfReportedClients;
+  const fw = Object.entries({ "qb-core": "QBCore", qbx_core: "Qbox", es_extended: "ESX",
+                              ox_core: "ox_core", vrp: "vRP", nd_core: "ND" })
+                   .filter(([k]) => res.includes(k)).map(([, n]) => n);
+  const shots = res.filter(r => /screenshot/i.test(r)).slice(0, 6);
+  const acs = res.filter(r => AC.test(r)).slice(0, 6);
+  const maybeAc = res.filter(r => MAYBE_AC.test(r) && !AC.test(r)).slice(0, 6);
+
+  // ~34% of servers replace every entry with a placeholder ("Player", id 0, ping 0). That is
+  // privacy, not padding — the count still matches exactly — so the ping-shape checks below
+  // would otherwise flag every one of them as fake.
+  anonList = players.length >= 5 && new Set(players.map(p => p.name)).size === 1
+    && players.every(p => !p.id && !p.ping);
+
+  const flags = [];
+  if (said && Math.abs(said - players.length) > Math.max(5, said * 0.1))
+    flags.push(`list shows ${said}, only ${players.length} player entries`);
+  if (!anonList) {
+    if (pings.length && new Set(pings).size <= Math.max(1, pings.length / 10))
+      flags.push(`${new Set(pings).size} distinct pings across ${pings.length} players`);
+    if (pings.filter(p => p <= 0).length > pings.length * 0.2) flags.push("many zero pings");
+  }
+
+  lastRes = res.slice().sort();
+  lastPlayers = players.slice();
+
+  $("deep").innerHTML = `
+    <b>${res.length} resources</b> · framework: ${esc(fw.join(", ")) || "unknown/custom"}
+    ${acs.length
+      ? `<div class="tags"><span class="tag">anticheat</span>${acs.map(r => `<span class="tag">${esc(r)}</span>`).join("")}</div>`
+      : maybeAc.length
+      ? `<div class="tags"><span class="tag">maybe anticheat</span>${maybeAc.map(r => `<span class="tag">${esc(r)}</span>`).join("")}</div>
+         <div class="cd">matched only on the <code>*_ac</code> naming convention — could be any script</div>`
+      : `<div class="cd" style="margin-top:8px">No anticheat resource visible. Renaming one is
+         normal practice, so this is not evidence that none is running.</div>`}
+    ${shots.length ? `<div class="tags"><span class="tag flag">can screenshot your game</span>${shots.map(r => `<span class="tag">${esc(r)}</span>`).join("")}</div>` : ""}
+    <div style="margin-top:13px"><b>population:</b> ${flags.length
+      ? `<span class="flag">looks padded</span> — ${esc(flags.join("; "))}`
+      : `<span class="fine">consistent</span>`}
+      ${pings.length ? `<span class="cd"> · ping median ${med(pings)}, range ${Math.min(...pings)}–${Math.max(...pings)}, ${new Set(pings).size} distinct</span>` : ""}
+    </div>
+    <div>
+      <button class="open" onclick="showPlayers()">${players.length} players${anonList ? " (list hidden)" : " online"}</button>
+      <button class="open" onclick="showRes()">${res.length} resources</button>
+    </div>
+    <div class="cd" style="margin-top:9px">${anonList
+      ? `This server hides its player list — every entry is a placeholder
+         (<code>${esc(players[0]?.name)}</code>, id 0, ping 0). The <b>count is still real</b>:
+         it matches what the server reports. You just can't see who's on.`
+      : `FXServer masks identifiers and IPs from outside queries — name, slot id and ping is
+         all any server exposes.`}</div>`;
+}
+
+// ---- modal
+let mItems = [], mText = null, mHtml = null, mCsvFn = null;
+
+function showPanel(title, html) {
+  $("mTitle").textContent = title;
+  $("mCount").textContent = "";
+  $("mFilterRow").hidden = true;
+  $("mCsv").hidden = !mCsvFn;
+  $("mBody").innerHTML = html;
+  $("modal").showModal();
+}
+function showList(title, items, text, html, csvFn) {
+  mItems = items; mText = text; mHtml = html; mCsvFn = csvFn || null;
+  $("mTitle").textContent = title;
+  $("mFilterRow").hidden = false;
+  $("mCsv").hidden = !mCsvFn;
+  $("mFilter").value = "";
+  drawList();
+  $("modal").showModal();
+  $("mFilter").focus();
+}
+function drawList() {
+  const t = $("mFilter").value.trim().toLowerCase();
+  const hit = t ? mItems.filter(i => mText(i).toLowerCase().includes(t)) : mItems;
+  $("mCount").textContent = t ? `${hit.length} of ${mItems.length}` : `${mItems.length}`;
+  $("mBody").innerHTML = hit.length ? mHtml(hit) : `<div class="empty">nothing matches “${esc(t)}”</div>`;
+}
+
+let lastPlayers = [], lastRes = [], lastVars = [], anonList = false;
+let sortKey = "ping", sortDir = 1;
+const cmp = (a, b) => {
+  const x = a[sortKey], y = b[sortKey];
+  return (typeof x === "number" && typeof y === "number"
+    ? x - y
+    : String(x).localeCompare(String(y), undefined, { sensitivity: "base", numeric: true })) * sortDir;
+};
+const showPlayers = () => showList("players online", lastPlayers, p => String(p.name),
+  rows => (anonList ? `<div class="cd" style="margin-bottom:10px">This server hides its player
+    list — the names below are placeholders it sends to everyone, not real players. The
+    <b>number</b> of them is accurate.</div>` : "") +
+  `<table class="pl"><thead><tr>${
+    ["id", "name", "ping"].map(k =>
+      `<th data-k="${k}" class="${k === sortKey ? "on" : ""}">${k}${k === sortKey ? (sortDir > 0 ? " ▲" : " ▼") : ""}</th>`).join("")
+  }</tr></thead><tbody>${
+    rows.slice().sort(cmp).map(p =>
+      `<tr><td>${esc(p.id)}</td><td>${esc(p.name)}</td><td>${esc(p.ping)}</td></tr>`).join("")
+  }</tbody></table>`,
+  rows => csv(`${current?.code || "server"}-players.csv`, ["id", "name", "ping"],
+    rows.slice().sort(cmp).map(p => [p.id, p.name, p.ping])));
+const showRes = () => showList("resources", lastRes, r => r,
+  rows => `<div class="tags">${rows.map(r => `<span class="tag">${esc(r)}</span>`).join("")}</div>`,
+  rows => csv(`${current?.code || "server"}-resources.csv`, ["resource"], rows.map(r => [r])));
+const showVars = () => showList("server vars", lastVars, ([k, v]) => k + " " + v,
+  rows => `<dl class="vars">${rows.map(([k, v]) =>
+    `<dt>${esc(k)}</dt><dd>${esc(String(v).slice(0, 400))}</dd>`).join("")}</dl>`,
+  rows => csv(`${current?.code || "server"}-vars.csv`, ["key", "value"], rows));
+
+function showHistory() {
+  if (!current) return;
+  const code = current.code, name = current.plain;
+  const a = readJSON(HKEY, {})[code] || [];
+  mCsvFn = a.length ? () => csv(`${code}-history.csv`, ["time", "players"],
+    a.map(([ts, c]) => [new Date(ts).toISOString(), c])) : null;
+  const note = `<div class="cd" style="margin-top:10px">${isFav(code)
+    ? "This server is a favorite, so it's sampled every 5 min while this tab is open."
+    : "Favorite it (★) to sample every 5 min while this tab is open."}
+    For collection with the browser closed: <code>python fivem.py --watch ${esc(code)}</code>.</div>`;
+
+  if (a.length < 2) {
+    return showPanel(`history — ${name}`,
+      `<div class="empty">${a.length ? "1 sample so far" : "No samples yet"}. A sample is saved
+       each time you open this server; the by-hour view needs a few hours of them.</div>${note}`);
+  }
+  const pop = a.map(r => r[1]);
+  const span = (a.at(-1)[0] - a[0][0]) / 3.6e6;
+  const byHour = {};
+  for (const [ts, c] of a) (byHour[new Date(ts).getHours()] ??= []).push(c);
+  const rows = Object.entries(byHour).map(([h, v]) => [+h, med(v)]).sort((x, y) => x[0] - y[0]);
+  const top = Math.max(...rows.map(r => r[1]), 1);
+
+  showPanel(`history — ${name}`, `
+    <div class="stat">
+      <span>samples <b>${a.length}</b></span><span>over <b>${span.toFixed(1)}h</b></span>
+      <span>peak <b>${Math.max(...pop)}</b></span><span>median <b>${med(pop)}</b></span>
+      <span>low <b>${Math.min(...pop)}</b></span>
+    </div>
+    ${span >= 6 ? `<div class="cd">median players by hour (your local time)</div>
+    <div class="bars">${rows.map(([h, n]) =>
+      `<div class="bar"><span class="hr">${String(h).padStart(2, "0")}:00</span>
+       <span class="fill" style="width:${Math.max(2, n / top * 100)}%"></span>
+       <span class="n">${n}</span></div>`).join("")}</div>`
+      : `<div class="cd">Need ~6h of samples for the by-hour view (have ${span.toFixed(1)}h).</div>`}
+    ${note}`);
+}
+
+// ---- watch names across favorites
+function showWatch() {
+  mCsvFn = null;
+  const w = watches(), f = favs();
+  showPanel("watch player names", `
+    <div class="cd">Checked against your ${f.length} favorite server${f.length === 1 ? "" : "s"}
+      every 5 minutes while this tab is open. Matching is case-insensitive and partial.</div>
+    <div class="frow" style="margin:12px 0">
+      <input id="wIn" type="search" placeholder="player name…" style="flex:1">
+      <button id="wAdd">add</button>
+    </div>
+    <div id="wList">${w.length
+      ? w.map((n, i) => `<div class="watchrow"><span>${esc(n)}</span>
+          <button data-wrm="${i}">remove</button></div>`).join("")
+      : `<div class="empty">No names watched yet.</div>`}</div>
+    ${f.length ? "" : `<div class="cd" style="margin-top:12px">You have no favorites yet —
+      star a server and it gets checked.</div>`}`);
+
+  const add = () => {
+    const n = $("wIn").value.trim();
+    if (!n) return;
+    writeJSON(WKEY, [...watches().filter(x => x.toLowerCase() !== n.toLowerCase()), n]);
+    if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+    showWatch();
+    renderWatch();
+  };
+  $("wAdd").onclick = add;
+  $("wIn").onkeydown = e => { if (e.key === "Enter") add(); };
+  $("wList").onclick = e => {
+    const i = e.target.dataset.wrm;
+    if (i == null) return;
+    const w2 = watches(); w2.splice(+i, 1); writeJSON(WKEY, w2); showWatch(); renderWatch();
+  };
+}
+
+function toast(title, msg) {
+  const el = document.createElement("div");
+  el.className = "tst";
+  el.innerHTML = `<button>dismiss</button><b>${esc(title)}</b><br>${esc(msg)}`;
+  el.querySelector("button").onclick = () => el.remove();
+  $("toast").append(el);
+  if ("Notification" in window && Notification.permission === "granted")
+    new Notification("FiveM lookup", { body: msg });
+}
+
+const ago = ts => {
+  const m = Math.round((Date.now() - ts) / 60000);
+  return m < 1 ? "just now" : m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago`
+    : `${Math.round(m / 1440)}d ago`;
+};
+
+// status per watched name, kept across reloads:
+// { status: online|offline|unknown, code, server, player, ts }
+const WSKEY = "fivem-watch-state";
+const wstate = () => readJSON(WSKEY, {});
+
+function renderWatch() {
+  const w = watches(), st = wstate(), box = $("watchPanel");
+  box.hidden = !w.length;
+  if (!w.length) return;
+  box.innerHTML = `
+    <div class="whead">
+      <b>watching ${w.length} name${w.length === 1 ? "" : "s"}</b>
+      <button id="wNow">check now</button>
+      <button id="wEdit">edit</button>
+    </div>
+    ${w.map(n => {
+      const s = st[n.toLowerCase()] || { status: "unknown" };
+      const cls = s.status === "online" ? "on" : s.status === "offline" ? "off" : "unk";
+      const where = s.status === "online" ? esc(s.server)
+        : s.server ? `left ${esc(s.server)} · ${ago(s.ts)}`
+        : "not seen yet";
+      return `<div class="wrow">
+        <span class="dot ${cls}" title="${s.status}"></span>
+        <span class="wname" title="${esc(s.player || n)}">${esc(s.player || n)}</span>
+        <span class="wwhere" ${s.code ? `data-go="${esc(s.code)}"` : ""} title="${esc(where)}">${where}</span>
+        <button class="x" data-wdel="${esc(n)}" aria-label="stop watching">&times;</button>
+      </div>`;
+    }).join("")}
+    ${favs().length ? "" : `<div class="cd" style="margin-top:8px">No favorites yet — star a
+      server, that's where names are looked for.</div>`}`;
+
+  $("wNow").onclick = async () => { $("wNow").textContent = "checking…"; await sampleFavs(); $("wNow").textContent = "check now"; };
+  $("wEdit").onclick = showWatch;
+  box.querySelectorAll("[data-wdel]").forEach(b => b.onclick = () => {
+    writeJSON(WKEY, watches().filter(x => x !== b.dataset.wdel));
+    renderWatch();
+  });
+  box.querySelectorAll("[data-go]").forEach(b => b.onclick = () => {
+    const s = servers.find(x => x.code === b.dataset.go);
+    if (s) detail(s);
+  });
+}
+
+async function sampleFavs() {
+  const w = watches();
+  const seen = new Map();          // lowercased watch term -> {code, server, player}
+  const reached = new Set();       // servers we actually got an answer from this round
+
+  for (const code of favs()) {
+    try {
+      const r = await fetch(`${PROXY || API}/single/${encodeURIComponent(code)}`);
+      const d = (await r.json()).Data;
+      if (!d) continue;
+      reached.add(code);
+      record(code, d.clients);
+      if (!w.length) continue;
+      const server = (d.hostname || code).replace(/\^[0-9]/g, "");
+      for (const p of d.players || [])
+        for (const n of w) {
+          const k = n.toLowerCase();
+          if (!seen.has(k) && String(p.name).toLowerCase().includes(k))
+            seen.set(k, { code, server, player: String(p.name) });
+        }
+    } catch { /* offline or CORS-blocked: this server just isn't confirmed this round */ }
+  }
+  if (!reached.size) return renderWatch();   // learned nothing — never call that a disconnect
+
+  const st = wstate(), now = Date.now();
+  for (const n of w) {
+    const k = n.toLowerCase(), prev = st[k], hit = seen.get(k);
+    if (hit) {
+      if (prev?.status === "online" && prev.code !== hit.code)
+        toast("player moved", `${hit.player}: ${prev.server} → ${hit.server}`);
+      else if (prev?.status !== "online")
+        toast("player online", `${hit.player} is on ${hit.server}`);
+      st[k] = { status: "online", ...hit, ts: now };
+    } else if (prev?.status === "online") {
+      // only a disconnect if we actually reached the server they were last seen on
+      if (reached.has(prev.code)) {
+        toast("player left", `${prev.player} left ${prev.server}`);
+        st[k] = { ...prev, status: "offline", ts: now };
+      }                                        // otherwise keep "online" and re-check later
+    } else if (!prev) {
+      st[k] = { status: "offline", ts: now };
+    }
+  }
+  writeJSON(WSKEY, st);
+  renderWatch();
+}
+setInterval(sampleFavs, 300000);
+
+// ---- events
+const pick = el => {
+  const s = servers.find(x => x.code === el.dataset.code);
+  if (s) detail(s, el);
+};
+let t;
+$("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(render, 150); });
+for (const id of ["fGame", "fLocale", "fMin", "fMax"]) $(id).addEventListener("change", render);
+$("fTag").addEventListener("input", () => { clearTimeout(t); t = setTimeout(render, 150); });
+$("fAc").addEventListener("change", runScan);
+$("acMore").addEventListener("click", runScan);
+$("fReset").addEventListener("click", () => {
+  for (const id of ["fGame", "fLocale", "fTag", "fMin", "fMax", "fAc"]) $(id).value = "";
+  render();
+});
+$("favBtn").addEventListener("click", () => {
+  favOnly = !favOnly;
+  $("favBtn").classList.toggle("on", favOnly);
+  render();
+});
+$("watchBtn").addEventListener("click", showWatch);
+$("csvBtn").addEventListener("click", () => csv("fivem-servers.csv",
+  ["code", "name", "players", "max", "build", "locale", "game", "tags"],
+  shown.map(s => [s.code, s.plain, s.clients, s.max, s.build, s.locale, s.game, s.tags])));
+
+$("hits").addEventListener("click", e => {
+  const star = e.target.closest("[data-fav]");
+  if (star) { e.stopPropagation(); return toggleFav(star.dataset.fav); }
+  const li = e.target.closest("li[data-code]");
+  if (li) pick(li);
+});
+$("detail").addEventListener("click", e => {
+  const star = e.target.closest("[data-fav]");
+  if (star) toggleFav(star.dataset.fav);
+});
+
+// arrow-key navigation: ↓ from the search box enters the list, ↑/↓ move, Enter opens
+function move(d) {
+  const items = [...document.querySelectorAll("#hits li[data-code]")];
+  if (!items.length) return;
+  const i = items.indexOf(document.activeElement);
+  const n = i < 0 ? 0 : Math.min(items.length - 1, Math.max(0, i + d));
+  items[n].focus();
+  items[n].scrollIntoView({ block: "nearest" });
+}
+$("q").addEventListener("keydown", e => {
+  if (e.key === "ArrowDown") { e.preventDefault(); move(0); }
+  else if (e.key === "Enter") { e.preventDefault(); const f = $("hits").querySelector("li[data-code]"); if (f) pick(f); }
+});
+$("hits").addEventListener("keydown", e => {
+  if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
+  else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (document.activeElement === $("hits").querySelector("li[data-code]")) $("q").focus();
+    else move(-1);
+  } else if (e.key === "Enter" && e.target.dataset.code) pick(e.target);
+});
+
+$("mFilter").addEventListener("input", drawList);
+$("mClose").addEventListener("click", () => $("modal").close());
+$("mCsv").addEventListener("click", () => {
+  if (!mCsvFn) return;
+  const t2 = $("mFilter").value.trim().toLowerCase();
+  mCsvFn(mItems && mText && t2 ? mItems.filter(i => mText(i).toLowerCase().includes(t2)) : mItems);
+});
+// clicking the backdrop targets the dialog itself, not its contents
+$("modal").addEventListener("click", e => { if (e.target.id === "modal") $("modal").close(); });
+$("mBody").addEventListener("click", e => {
+  const th = e.target.closest("th[data-k]");
+  if (!th) return;
+  const k = th.dataset.k;
+  if (k === sortKey) sortDir = -sortDir; else { sortKey = k; sortDir = 1; }
+  drawList();
+});
+
+load().catch(e => $("status").innerHTML =
+  `could not load the list (${esc(e.message)}). <button onclick="location.reload()">retry</button>`);
+</script>
+</body>
+</html>

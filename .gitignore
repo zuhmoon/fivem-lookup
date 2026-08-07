@@ -1,0 +1,5 @@
+list.bin
+history.db
+*.json
+__pycache__/
+!.claude/launch.json
